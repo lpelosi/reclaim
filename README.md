@@ -71,7 +71,7 @@ The project is a Swift Package with three targets:
 
 ## Releasing
 
-Maintainers: see [`RELEASE.md`](RELEASE.md). In short:
+Maintainers with an Apple Developer ID and notary credentials configured:
 
 ```sh
 scripts/release.sh 1.2.0    # build → notarize → DMG → GitHub Release
