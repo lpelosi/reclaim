@@ -1,5 +1,16 @@
 import Foundation
+import AppKit
 import ServiceManagement
+
+/// Full Disk Access is the clean way to let Reclaim scan protected folders
+/// (Desktop/Documents/Downloads/volumes) without per-folder prompts. It's a
+/// one-time, user-granted permission that persists.
+enum FullDiskAccess {
+    static func openSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        NSWorkspace.shared.open(url)
+    }
+}
 
 enum LoginItem {
     /// True if Reclaim is registered to launch at login.

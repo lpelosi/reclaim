@@ -50,6 +50,12 @@ struct ReportView: View {
                     }
                 }
                 Spacer()
+                Button {
+                    FullDiskAccess.openSettings()
+                } label: {
+                    Image(systemName: "lock.shield")
+                }
+                .help("Grant Full Disk Access so scans stop prompting for each folder (Desktop, Documents, Downloads, drives).")
                 scanOptionsMenu
                 Button(model.isScanning ? "Scanning…" : "Rescan") {
                     model.runScanNow()

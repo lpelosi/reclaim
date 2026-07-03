@@ -51,6 +51,11 @@ struct MenuBarView: View {
 
             Divider()
 
+            Button("Grant Full Disk Access…") {
+                FullDiskAccess.openSettings()
+            }
+            .help("Opens System Settings. Add Reclaim to Full Disk Access so scans stop asking for each folder.")
+
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .toggleStyle(.checkbox)
                 .onChange(of: launchAtLogin) { newValue in

@@ -30,5 +30,15 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Reclaim</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Reclaim scans your Desktop for large files, duplicates, and old items to reclaim disk space.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Reclaim scans your Documents for large files, duplicates, and old items to reclaim disk space.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Reclaim scans your Downloads for old installers, large files, and duplicates to reclaim disk space.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Reclaim scans external drives for large files and duplicates when that option is enabled.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Reclaim scans mounted network volumes for large files and duplicates when that option is enabled.</string>
 </dict>
 </plist>
