@@ -99,14 +99,27 @@ else
   if [[ "$SIGN_IDENTITY" == Developer\ ID\ Application:* ]]; then
     TS=(--timestamp)
   fi
+  # codesign --timestamp contacts Apple's TSA, which flakes intermittently
+  # ("A timestamp was expected but was not found"). Retry a few times.
+  sign() {
+    local target="$1" attempt
+    for attempt in 1 2 3 4 5; do
+      if codesign --force --options runtime ${TS[@]+"${TS[@]}"} \
+           --sign "$SIGN_IDENTITY" "$target"; then
+        return 0
+      fi
+      echo "    codesign attempt $attempt failed (TSA?); retrying in 5s…" >&2
+      sleep 5
+    done
+    echo "ERROR: codesign failed after retries: $target" >&2
+    return 1
+  }
   # Sign inner executables (hardened runtime) inside-out, then the outer
   # bundle. --deep is deprecated and rejected by notarization.
   for bin in reclaim-scanner ReclaimApp; do
-    codesign --force --options runtime ${TS[@]+"${TS[@]}"} \
-      --sign "$SIGN_IDENTITY" "$CONTENTS/MacOS/$bin"
+    sign "$CONTENTS/MacOS/$bin"
   done
-  codesign --force --options runtime ${TS[@]+"${TS[@]}"} \
-    --sign "$SIGN_IDENTITY" "$BUILD_DIR"
+  sign "$BUILD_DIR"
   echo "==> Verifying signature"
   codesign --verify --strict --verbose=2 "$BUILD_DIR"
 fi
