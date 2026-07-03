@@ -6,3 +6,4 @@ DerivedData/
 *.dSYM
 .DS_Store
 dist/
+CLAUDE.md

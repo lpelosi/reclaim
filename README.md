@@ -69,8 +69,6 @@ The project is a Swift Package with three targets:
 - `ReclaimScanner` — the `reclaim-scanner` CLI that performs scans and writes the report.
 - `ReclaimApp` — the SwiftUI menu-bar app.
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture details.
-
 ## Releasing
 
 Maintainers: see [`RELEASE.md`](RELEASE.md). In short:
