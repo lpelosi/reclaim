@@ -192,6 +192,18 @@ public enum Rules {
         // dynamically by the Scanner from ScanOptions (Review tier), not here.
 
         // ============ TIER 4: DANGEROUS ============
+        // System-level iOS Simulator storage — usually the biggest disk hog on
+        // dev Macs (tens of GB). Root-owned, so Reclaim can't trash these; they
+        // are surfaced for visibility. Remove via Xcode ▸ Settings ▸ Platforms,
+        // `xcrun simctl runtime delete <id>`, or `sudo rm -rf`.
+        Rule(id: "sim.runtimes.system", category: "Xcode",
+             description: "iOS Simulator runtime — remove unused via Xcode ▸ Settings ▸ Platforms",
+             tier: .dangerous,
+             resolve: .shell("ls -d /Library/Developer/CoreSimulator/Volumes/* 2>/dev/null")),
+        Rule(id: "sim.caches.system", category: "Xcode",
+             description: "Simulator caches (system, regenerate) — needs sudo",
+             tier: .dangerous, resolve: .literal("/Library/Developer/CoreSimulator/Caches")),
+
         Rule(id: "sys.vm", category: "System", description: "Swap/sleepimage (NEEDS sudo, system-managed)",
              tier: .dangerous, resolve: .literal("/private/var/vm")),
         Rule(id: "sys.caches", category: "System", description: "System-wide /Library/Caches",

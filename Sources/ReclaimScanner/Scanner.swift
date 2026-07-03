@@ -6,6 +6,9 @@ public final class Scanner {
     let reporter: ProgressReporter
     let options: ScanOptions
     let fm = FileManager.default
+    /// ProgressReporter isn't thread-safe; guard it during parallel phases.
+    private let reportLock = NSLock()
+    private let maxConcurrent = max(2, min(8, ProcessInfo.processInfo.activeProcessorCount))
 
     public init(whitelist: Whitelist,
                 reporter: ProgressReporter = ProgressReporter(),
@@ -20,25 +23,25 @@ public final class Scanner {
         reporter.update(phase: "rules", current: 0, total: totalRules,
                         label: "Resolving scan rules…", force: true)
 
-        var items: [ReportItem] = []
-        for (idx, rule) in Rules.all.enumerated() {
-            reporter.update(phase: "rules", current: idx, total: totalRules,
-                            label: "Rule: \(rule.description)")
-            let paths = resolve(rule.resolve)
-            for path in paths {
-                guard !whitelist.contains(path) else { continue }
-                guard fm.fileExists(atPath: path) else { continue }
-                items.append(ReportItem(
-                    path: path,
-                    size: 0,
-                    tier: rule.tier,
-                    category: rule.category,
-                    description: rule.description,
-                    lastModified: nil,
-                    ruleId: rule.id
-                ))
+        // Resolve rules in parallel — many spawn `find ~` subprocesses that
+        // dominate wall time when run serially.
+        var done = 0
+        let perRule = parallelMap(Rules.all) { rule -> [ReportItem] in
+            let paths = self.resolve(rule.resolve)
+            self.reportLock.lock()
+            done += 1
+            self.reporter.update(phase: "rules", current: done, total: totalRules,
+                                 label: "Rule: \(rule.description)")
+            self.reportLock.unlock()
+            return paths.compactMap { path in
+                guard !self.whitelist.contains(path), self.fm.fileExists(atPath: path)
+                else { return nil }
+                return ReportItem(path: path, size: 0, tier: rule.tier,
+                                  category: rule.category, description: rule.description,
+                                  lastModified: nil, ruleId: rule.id)
             }
         }
+        var items: [ReportItem] = perRule.flatMap { $0 }
         reporter.update(phase: "rules", current: totalRules, total: totalRules,
                         label: "Rules complete", force: true)
 
@@ -63,18 +66,22 @@ public final class Scanner {
 
         reporter.update(phase: "sizing", current: 0, total: deduped.count,
                         label: "Computing sizes…", force: true)
-        var sized: [ReportItem] = []
-        for (idx, item) in deduped.enumerated() {
-            reporter.update(phase: "sizing", current: idx, total: deduped.count,
-                            label: (item.path as NSString).lastPathComponent)
+        // Size items in parallel — each is an independent `du` subprocess.
+        var sizedCount = 0
+        let sizedOpt = parallelMap(deduped) { item -> ReportItem? in
             var i = item
             // Items pre-sized during their scan (e.g. large folders) keep it.
-            if i.size == 0 { i.size = sizeOf(path: item.path) }
-            if i.size > 0 {
-                if i.lastModified == nil { i.lastModified = mtimeOf(path: item.path) }
-                sized.append(i)
-            }
+            if i.size == 0 { i.size = self.sizeOf(path: item.path) }
+            self.reportLock.lock()
+            sizedCount += 1
+            self.reporter.update(phase: "sizing", current: sizedCount, total: deduped.count,
+                                 label: (item.path as NSString).lastPathComponent)
+            self.reportLock.unlock()
+            guard i.size > 0 else { return nil }
+            if i.lastModified == nil { i.lastModified = self.mtimeOf(path: item.path) }
+            return i
         }
+        var sized: [ReportItem] = sizedOpt.compactMap { $0 }
         reporter.update(phase: "sizing", current: deduped.count, total: deduped.count,
                         label: "Sizing complete", force: true)
 
@@ -172,6 +179,29 @@ public final class Scanner {
 
     private func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Map `items` concurrently (bounded by `maxConcurrent`), preserving order.
+    /// Transforms are pure subprocess calls (find/du), so they parallelize well.
+    private func parallelMap<T, R>(_ items: [T], _ transform: @escaping (T) -> R) -> [R] {
+        if items.isEmpty { return [] }
+        var results = [R?](repeating: nil, count: items.count)
+        let resultLock = NSLock()
+        let sem = DispatchSemaphore(value: maxConcurrent)
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "reclaim.parallelMap", attributes: .concurrent)
+        for (i, item) in items.enumerated() {
+            sem.wait()
+            group.enter()
+            queue.async {
+                let r = transform(item)
+                resultLock.lock(); results[i] = r; resultLock.unlock()
+                sem.signal()
+                group.leave()
+            }
+        }
+        group.wait()
+        return results.map { $0! }
     }
 
     /// Drop exact duplicate paths (first rule wins) AND drop any path whose
