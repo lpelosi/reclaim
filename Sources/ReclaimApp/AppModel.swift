@@ -163,10 +163,19 @@ final class AppModel: ObservableObject {
         let selected = report.items.filter { selectedIds.contains($0.id) && !$0.isKeeper }
         let results = Trasher.trashAll(selected.map(\.path))
         let trashedPaths = Set(results.compactMap { $0.error == nil ? $0.path : nil })
+        let failed = results.filter { $0.error != nil }
         let remaining = report.items.filter { !trashedPaths.contains($0.path) }
         self.report = Report(generated: report.generated, items: remaining)
         try? self.report?.save()
         selectedIds.removeAll()
+        // Surface failures (e.g. system-owned items need elevated privileges).
+        if failed.isEmpty {
+            lastScanError = nil
+        } else {
+            let names = failed.prefix(2).map { ($0.path as NSString).lastPathComponent }.joined(separator: ", ")
+            let more = failed.count > 2 ? " and \(failed.count - 2) more" : ""
+            lastScanError = "Couldn't trash \(failed.count) item\(failed.count == 1 ? "" : "s") (\(names)\(more)) — likely system-owned; remove with sudo or the tool noted in the description."
+        }
     }
 
     func whitelistSelected(asGlob: Bool = false) {

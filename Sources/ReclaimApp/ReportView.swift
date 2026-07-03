@@ -225,8 +225,16 @@ struct ReportView: View {
     @ViewBuilder
     private var footer: some View {
         HStack {
-            Text(selectionSummary)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(selectionSummary)
+                    .foregroundStyle(.secondary)
+                if let err = model.lastScanError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+            }
             Spacer()
             Button("Whitelist Selected") {
                 model.whitelistSelected(asGlob: false)
@@ -237,17 +245,22 @@ struct ReportView: View {
                 confirmDelete = true
             }
             .keyboardShortcut(.delete)
-            .disabled(model.selectedIds.isEmpty || requiresDangerousConfirm)
+            .disabled(model.selectedIds.isEmpty)
             .tint(.red)
         }
         .padding()
-        .alert("Move selected items to Trash?", isPresented: $confirmDelete) {
+        .alert(hasDangerousSelected ? "Delete DANGEROUS items?" : "Move selected items to Trash?",
+               isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) {}
-            Button("Move to Trash", role: .destructive) {
+            Button(hasDangerousSelected ? "Delete Anyway" : "Move to Trash", role: .destructive) {
                 model.trashSelected()
             }
         } message: {
-            Text("\(model.selectedIds.count) items will move to the Trash. You can restore them from there.")
+            if hasDangerousSelected {
+                Text("Your selection includes DANGEROUS, system-managed items. Some may be owned by the system and can only be removed with elevated privileges (they'll be skipped). Trashed items can be restored from the Trash.")
+            } else {
+                Text("\(model.selectedIds.count) items will move to the Trash. You can restore them from there.")
+            }
         }
     }
 
@@ -258,7 +271,7 @@ struct ReportView: View {
         return "\(chosen.count) selected · \(total.humanSize)"
     }
 
-    private var requiresDangerousConfirm: Bool {
+    private var hasDangerousSelected: Bool {
         guard let report = model.report else { return false }
         return report.items.contains { model.selectedIds.contains($0.id) && $0.tier == .dangerous }
     }
