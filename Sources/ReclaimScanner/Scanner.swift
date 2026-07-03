@@ -130,11 +130,15 @@ public final class Scanner {
 
     /// Large folders (Review): direct child dirs of each root, sized once.
     private func largeDirItems() -> [ReportItem] {
+        let protected = protectedDirs()
+        let roots = effectiveRoots()
         var out: [ReportItem] = []
-        for root in effectiveRoots() {
+        for root in roots {
             let children = (try? fm.contentsOfDirectory(atPath: root)) ?? []
             for name in children where !Self.pruneDirNames.contains(name) && !name.hasPrefix(".") {
                 let path = (root as NSString).appendingPathComponent(name)
+                // Never flag standard home folders or a scan root itself.
+                guard !protected.contains(path), !roots.contains(path) else { continue }
                 var isDir: ObjCBool = false
                 guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue,
                       !whitelist.contains(path) else { continue }
@@ -196,6 +200,19 @@ public final class Scanner {
     private static let pruneDirNames: Set<String> = [
         "Library", "Applications", ".Trash", "node_modules", ".git"
     ]
+
+    /// Standard user home folders that must NEVER be flagged for deletion as a
+    /// whole (they hold the user's real files). The large-folder scan flags
+    /// their *contents*, not the containers themselves.
+    private func protectedDirs() -> Set<String> {
+        let home = Paths.home
+        let names = ["Documents", "Desktop", "Downloads", "Movies", "Music",
+                     "Pictures", "Public", "Library", "Applications",
+                     "Creative Cloud Files", "Sites"]
+        var s = Set(names.map { (home as NSString).appendingPathComponent($0) })
+        s.insert(home)
+        return s
+    }
 
     private func resolve(_ res: Resolution) -> [String] {
         switch res {
