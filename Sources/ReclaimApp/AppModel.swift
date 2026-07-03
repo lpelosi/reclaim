@@ -11,6 +11,9 @@ final class AppModel: ObservableObject {
     @Published var lastScanError: String?
     @Published var isScanning: Bool = false
     @Published var scanProgress: ScanProgress?
+    @Published var scanOptions: ScanOptions = ScanOptions.load() {
+        didSet { try? scanOptions.save() }
+    }
 
     let whitelistStore = WhitelistStore()
     private var scannerProcess: Process?
@@ -103,6 +106,7 @@ final class AppModel: ObservableObject {
 
     func runScanNow() {
         guard !isScanning else { return }
+        try? scanOptions.save() // scanner reads this file at launch
         isScanning = true
         lastScanError = nil
         scanProgress = ScanProgress(phase: "starting", current: 0, total: 1, label: "Launching scanner…")

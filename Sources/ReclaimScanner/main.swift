@@ -6,7 +6,8 @@ import UserNotifications
 
 let store = WhitelistStore()
 let progress = ProgressReporter()
-let scanner = Scanner(whitelist: store.whitelist, reporter: progress)
+let options = ScanOptions.load()
+let scanner = Scanner(whitelist: store.whitelist, reporter: progress, options: options)
 
 let started = Date()
 log("scan started")

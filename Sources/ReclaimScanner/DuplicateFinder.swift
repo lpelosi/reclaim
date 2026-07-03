@@ -3,13 +3,15 @@ import CryptoKit
 import ReclaimCore
 
 public final class DuplicateFinder {
+    public static let defaultRoots = ["~/Downloads", "~/Desktop", "~/Documents"]
+
     let roots: [String]
     let minBytes: Int64
     let pruneNames: Set<String>
     let whitelist: Whitelist
 
     public init(
-        roots: [String] = ["~/Downloads", "~/Desktop", "~/Documents"],
+        roots: [String] = DuplicateFinder.defaultRoots,
         minBytes: Int64 = 10_000_000, // 10 MB
         pruneNames: Set<String> = [
             "Library", ".git", "node_modules", ".build", ".swiftpm",

@@ -188,9 +188,8 @@ public enum Rules {
         Rule(id: "android.avd", category: "Android", description: "Android Virtual Devices",
              tier: .review, resolve: .literal("~/.android/avd")),
 
-        // ============ TIER 3: HEURISTIC ============
-        Rule(id: "large.home", category: "Heuristic", description: "Files > 500MB in $HOME (excluding Library/Applications)",
-             tier: .heuristic, resolve: .largeFiles(base: "~", minBytes: 500_000_000)),
+        // Large-file / large-folder / old-file scans are opt-in and generated
+        // dynamically by the Scanner from ScanOptions (Review tier), not here.
 
         // ============ TIER 4: DANGEROUS ============
         Rule(id: "sys.vm", category: "System", description: "Swap/sleepimage (NEEDS sudo, system-managed)",

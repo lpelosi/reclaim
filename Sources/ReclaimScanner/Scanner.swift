@@ -4,11 +4,15 @@ import ReclaimCore
 public final class Scanner {
     let whitelist: Whitelist
     let reporter: ProgressReporter
+    let options: ScanOptions
     let fm = FileManager.default
 
-    public init(whitelist: Whitelist, reporter: ProgressReporter = ProgressReporter()) {
+    public init(whitelist: Whitelist,
+                reporter: ProgressReporter = ProgressReporter(),
+                options: ScanOptions = ScanOptions()) {
         self.whitelist = whitelist
         self.reporter = reporter
+        self.options = options
     }
 
     public func run() -> Report {
@@ -38,6 +42,23 @@ public final class Scanner {
         reporter.update(phase: "rules", current: totalRules, total: totalRules,
                         label: "Rules complete", force: true)
 
+        // Opt-in Review-tier scans, driven by ScanOptions.
+        if options.scanLargeFiles {
+            reporter.update(phase: "largeFiles", current: 0, total: 1,
+                            label: "Scanning for large files…", force: true)
+            items.append(contentsOf: largeFileItems())
+        }
+        if options.scanLargeDirs {
+            reporter.update(phase: "largeDirs", current: 0, total: 1,
+                            label: "Scanning for large folders…", force: true)
+            items.append(contentsOf: largeDirItems())
+        }
+        if options.flagOldFiles {
+            reporter.update(phase: "oldFiles", current: 0, total: 1,
+                            label: "Scanning for old files…", force: true)
+            items.append(contentsOf: oldFileItems())
+        }
+
         let deduped = dedupe(items)
 
         reporter.update(phase: "sizing", current: 0, total: deduped.count,
@@ -47,23 +68,106 @@ public final class Scanner {
             reporter.update(phase: "sizing", current: idx, total: deduped.count,
                             label: (item.path as NSString).lastPathComponent)
             var i = item
-            i.size = sizeOf(path: item.path)
+            // Items pre-sized during their scan (e.g. large folders) keep it.
+            if i.size == 0 { i.size = sizeOf(path: item.path) }
             if i.size > 0 {
-                i.lastModified = mtimeOf(path: item.path)
+                if i.lastModified == nil { i.lastModified = mtimeOf(path: item.path) }
                 sized.append(i)
             }
         }
         reporter.update(phase: "sizing", current: deduped.count, total: deduped.count,
                         label: "Sizing complete", force: true)
 
-        reporter.update(phase: "duplicates", current: 0, total: 1,
-                        label: "Scanning for duplicate files…", force: true)
-        let dupItems = DuplicateFinder(whitelist: whitelist).find()
-        sized.append(contentsOf: dupItems)
-        reporter.update(phase: "duplicates", current: 1, total: 1,
-                        label: "Duplicate scan complete", force: true)
+        if options.scanDuplicates {
+            reporter.update(phase: "duplicates", current: 0, total: 1,
+                            label: "Scanning for duplicate files…", force: true)
+            let dupRoots = options.includeExternalDrives
+                ? DuplicateFinder.defaultRoots + externalVolumes()
+                : DuplicateFinder.defaultRoots
+            let dupItems = DuplicateFinder(roots: dupRoots, whitelist: whitelist).find()
+            sized.append(contentsOf: dupItems)
+            reporter.update(phase: "duplicates", current: 1, total: 1,
+                            label: "Duplicate scan complete", force: true)
+        }
 
         return Report(generated: Date(), items: sized.sorted { $0.size > $1.size })
+    }
+
+    // MARK: - Opt-in scans
+
+    /// Roots the large/old scans walk: the user's chosen tilde roots, plus
+    /// mounted external volumes when enabled.
+    private func effectiveRoots() -> [String] {
+        var roots = options.roots.map(Paths.expand)
+        if options.includeExternalDrives { roots += externalVolumes() }
+        // Drop roots that don't exist so `find` doesn't error.
+        return roots.filter { fm.fileExists(atPath: $0) }
+    }
+
+    /// Mounted volumes under /Volumes, excluding the boot volume symlink.
+    private func externalVolumes() -> [String] {
+        let vols = (try? fm.contentsOfDirectory(atPath: "/Volumes")) ?? []
+        return vols.map { "/Volumes/\($0)" }.filter {
+            (try? fm.destinationOfSymbolicLink(atPath: $0)) == nil  // skip the "/" symlink
+        }
+    }
+
+    /// Large individual files (Review — often personal media the user keeps).
+    private func largeFileItems() -> [ReportItem] {
+        let mb = max(1, Int(options.minLargeBytes / 1_000_000))
+        var out: [ReportItem] = []
+        for root in effectiveRoots() {
+            let cmd = "find \(shellQuote(root)) \(Self.prunePredicate) -o -type f -size +\(mb)M -print 2>/dev/null | grep -v '/Applications/'"
+            for path in shellPaths(cmd) where !whitelist.contains(path) {
+                out.append(ReportItem(
+                    path: path, size: 0, tier: .review, category: "Large File",
+                    description: "Large file — possibly personal, review",
+                    ruleId: "large.file"))
+            }
+        }
+        return out
+    }
+
+    /// Large folders (Review): direct child dirs of each root, sized once.
+    private func largeDirItems() -> [ReportItem] {
+        var out: [ReportItem] = []
+        for root in effectiveRoots() {
+            let children = (try? fm.contentsOfDirectory(atPath: root)) ?? []
+            for name in children where !Self.pruneDirNames.contains(name) && !name.hasPrefix(".") {
+                let path = (root as NSString).appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue,
+                      !whitelist.contains(path) else { continue }
+                let size = sizeOf(path: path)
+                guard size >= options.minLargeBytes else { continue }
+                out.append(ReportItem(
+                    path: path, size: size, tier: .review, category: "Large Folder",
+                    description: "Large folder — review before deleting",
+                    lastModified: mtimeOf(path: path), ruleId: "large.dir"))
+            }
+        }
+        return out
+    }
+
+    /// Old, sizeable files not modified within `oldFileDays` (Review).
+    private func oldFileItems() -> [ReportItem] {
+        let floor = min(options.minLargeBytes, ScanOptions.oldFileMinBytes)
+        let mb = max(1, Int(floor / 1_000_000))
+        var out: [ReportItem] = []
+        for root in effectiveRoots() {
+            let cmd = "find \(shellQuote(root)) \(Self.prunePredicate) -o -type f -mtime +\(options.oldFileDays) -size +\(mb)M -print 2>/dev/null | grep -v '/Applications/'"
+            for path in shellPaths(cmd) where !whitelist.contains(path) {
+                out.append(ReportItem(
+                    path: path, size: 0, tier: .review, category: "Old File",
+                    description: "Not modified in over a year — review",
+                    ruleId: "old.file"))
+            }
+        }
+        return out
+    }
+
+    private func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Drop exact duplicate paths (first rule wins) AND drop any path whose
@@ -87,6 +191,11 @@ public final class Scanner {
     private static let prunePredicate =
         "\\( -path '*/Library/*' -o -path '*/Mobile Documents/*' -o -path '*/.Trash/*' "
         + "-o -name node_modules -o -name .git \\) -prune"
+
+    /// Top-level folder names skipped by the large-folder scan (system/managed).
+    private static let pruneDirNames: Set<String> = [
+        "Library", "Applications", ".Trash", "node_modules", ".git"
+    ]
 
     private func resolve(_ res: Resolution) -> [String] {
         switch res {

@@ -5,6 +5,24 @@ struct ReportView: View {
     @ObservedObject var model: AppModel
     @State private var confirmDelete = false
     @State private var showDangerous = false
+    @State private var collapsedTiers: Set<Tier> = []
+
+    /// Binding into a field of the persisted scan options.
+    private func opt<T>(_ keyPath: WritableKeyPath<ScanOptions, T>) -> Binding<T> {
+        Binding(get: { model.scanOptions[keyPath: keyPath] },
+                set: { model.scanOptions[keyPath: keyPath] = $0 })
+    }
+
+    private func rootBinding(_ root: String) -> Binding<Bool> {
+        Binding(
+            get: { model.scanOptions.roots.contains(root) },
+            set: { on in
+                var roots = model.scanOptions.roots
+                if on { if !roots.contains(root) { roots.append(root) } }
+                else { roots.removeAll { $0 == root } }
+                model.scanOptions.roots = roots
+            })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,6 +50,7 @@ struct ReportView: View {
                     }
                 }
                 Spacer()
+                scanOptionsMenu
                 Button(model.isScanning ? "Scanning…" : "Rescan") {
                     model.runScanNow()
                 }.disabled(model.isScanning)
@@ -49,6 +68,39 @@ struct ReportView: View {
     }
 
     @ViewBuilder
+    private var scanOptionsMenu: some View {
+        Menu("Scan Options") {
+            Toggle("Large files", isOn: opt(\.scanLargeFiles))
+            Toggle("Large folders", isOn: opt(\.scanLargeDirs))
+            Toggle("Old files (not modified >1yr)", isOn: opt(\.flagOldFiles))
+            Toggle("Duplicate files", isOn: opt(\.scanDuplicates))
+            Toggle("Include external drives", isOn: opt(\.includeExternalDrives))
+
+            Divider()
+            Picker("Minimum \"large\" size", selection: opt(\.minLargeBytes)) {
+                Text("100 MB").tag(Int64(100_000_000))
+                Text("500 MB").tag(Int64(500_000_000))
+                Text("1 GB").tag(Int64(1_000_000_000))
+            }
+
+            Divider()
+            Section("Scan folders for large/old files") {
+                ForEach(ScanOptions.availableRoots, id: \.self) { root in
+                    Toggle(rootLabel(root), isOn: rootBinding(root))
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(model.isScanning)
+        .help("Choose what a scan looks for. Applies to manual and scheduled scans.")
+    }
+
+    private func rootLabel(_ root: String) -> String {
+        root == "~" ? "Home (~)" : (root as NSString).lastPathComponent
+    }
+
+    @ViewBuilder
     private var content: some View {
         if let report = model.report {
             List {
@@ -56,15 +108,23 @@ struct ReportView: View {
                     let items = report.items.filter { $0.tier == tier }
                     let selectableIds = items.filter { !$0.isKeeper }.map(\.id)
                     Section {
-                        ForEach(items) { item in
-                            row(item)
+                        if !collapsedTiers.contains(tier) {
+                            ForEach(items) { item in
+                                row(item)
+                            }
                         }
                     } header: {
                         TierHeader(
                             tier: tier,
+                            count: items.count,
                             total: items.reduce(0) { $0 + $1.size },
                             selectableIds: selectableIds,
-                            selectedIds: $model.selectedIds
+                            selectedIds: $model.selectedIds,
+                            isCollapsed: collapsedTiers.contains(tier),
+                            onToggleCollapse: {
+                                if collapsedTiers.contains(tier) { collapsedTiers.remove(tier) }
+                                else { collapsedTiers.insert(tier) }
+                            }
                         )
                     }
                 }
@@ -229,9 +289,12 @@ struct ScanProgressLarge: View {
 
 struct TierHeader: View {
     let tier: Tier
+    let count: Int
     let total: Int64
     let selectableIds: [UUID]
     @Binding var selectedIds: Set<UUID>
+    let isCollapsed: Bool
+    let onToggleCollapse: () -> Void
 
     private var allSelected: Bool {
         !selectableIds.isEmpty && selectableIds.allSatisfy { selectedIds.contains($0) }
@@ -258,10 +321,20 @@ struct TierHeader: View {
                   : partiallySelected ? "Select all in this section (some selected)"
                   : "Select all in this section")
 
+            Button(action: onToggleCollapse) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+            }
+            .buttonStyle(.plain)
+            .help(isCollapsed ? "Expand section" : "Collapse section")
+
             Circle().fill(color).frame(width: 10, height: 10)
             Text(tier.label).bold()
+            Text("(\(count))").font(.caption).foregroundStyle(.secondary)
             if partiallySelected {
-                Text("(partial)").font(.caption).foregroundStyle(.secondary)
+                Text("· partial").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Text(total.humanSize).font(.system(.body, design: .monospaced))

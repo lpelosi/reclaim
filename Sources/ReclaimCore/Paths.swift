@@ -13,6 +13,7 @@ public enum Paths {
     public static var historyURL: URL { supportDir.appendingPathComponent("history.json") }
     public static var logURL: URL { supportDir.appendingPathComponent("scanner.log") }
     public static var progressURL: URL { supportDir.appendingPathComponent("progress.json") }
+    public static var scanOptionsURL: URL { supportDir.appendingPathComponent("scan-options.json") }
 
     public static func expand(_ path: String) -> String {
         (path as NSString).expandingTildeInPath
