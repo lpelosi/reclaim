@@ -22,6 +22,22 @@ DIST="$PROJECT_DIR/dist"
 DMG="$DIST/Reclaim-$VERSION.dmg"
 TAG="v$VERSION"
 
+# Submit to Apple's notary service with retries — uploads/polls flake with
+# transient HTTPClientError.connectTimeout. Each attempt is bounded by --timeout.
+notarize() {
+  local artifact="$1" attempt
+  for attempt in 1 2 3 4 5; do
+    if xcrun notarytool submit "$artifact" \
+         --keychain-profile "$NOTARY_PROFILE" --timeout 30m --wait; then
+      return 0
+    fi
+    echo "    notarize attempt $attempt failed (network?); retrying in 15s…" >&2
+    sleep 15
+  done
+  echo "ERROR: notarization failed after retries: $artifact" >&2
+  return 1
+}
+
 echo "==> Releasing Reclaim $VERSION (tag $TAG)"
 
 # Keep VERSION file in sync with the requested version.
@@ -35,7 +51,7 @@ RECLAIM_RELEASE=1 RECLAIM_VERSION="$VERSION" "$PROJECT_DIR/scripts/build-app.sh"
 echo "==> Notarizing app"
 APP_ZIP="$(mktemp -d)/Reclaim.zip"
 ditto -c -k --keepParent "$APP" "$APP_ZIP"
-xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+notarize "$APP_ZIP"
 xcrun stapler staple "$APP"
 
 # 3. Package the stapled app into a DMG.
@@ -43,7 +59,7 @@ xcrun stapler staple "$APP"
 
 # 4. Notarize + staple the DMG itself.
 echo "==> Notarizing DMG"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+notarize "$DMG"
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 
