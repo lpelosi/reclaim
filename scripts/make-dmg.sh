@@ -30,7 +30,13 @@ hdiutil create -volname "Reclaim $VERSION" \
 ID="${RECLAIM_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | \
   awk -F'"' '/Developer ID Application:/ {print $2; exit}')}"
 if [[ -n "$ID" && "$ID" != "-" ]]; then
-  codesign --force --sign "$ID" "$DMG"
+  # Developer ID signing timestamps via Apple's TSA, which flakes; retry.
+  for attempt in 1 2 3 4 5; do
+    if codesign --force --sign "$ID" "$DMG"; then break; fi
+    echo "    DMG codesign attempt $attempt failed (TSA?); retrying in 5s…" >&2
+    [[ $attempt -eq 5 ]] && { echo "ERROR: DMG codesign failed after retries" >&2; exit 1; }
+    sleep 5
+  done
 fi
 
 echo "Built $DMG"
